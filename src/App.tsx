@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { Layout, Model, TabNode, IJsonModel, TabSetNode, BorderNode, ITabSetRenderValues, Actions, DockLocation, AddIcon } from 'flexlayout-react';
-import 'flexlayout-react/style/light.css';
+import Editor from '@monaco-editor/react';
+import './rounded_dark.css';
 import './App.css';
+import './monaco.css';
 
 const json: IJsonModel = {
     global: { 
@@ -11,7 +13,9 @@ const json: IJsonModel = {
 		"tabSetMinHeight": 100,
 		"borderMinSize": 100,
 		"tabSetEnableTabScrollbar": true,
-		"borderEnableTabScrollbar": true
+		"borderEnableTabScrollbar": true,
+        "tabEnableRename": false,
+        "borderEnableAutoHide": true,
     },
     borders: [
         {
@@ -26,6 +30,19 @@ const json: IJsonModel = {
                 },
             ]
         },
+        {
+            "type": "border",
+            "location": "left",
+            "children": [
+            ]
+        },
+        {
+            "type": "border",
+            "location": "right",
+            "children": [
+            ]
+        },
+
     ],
     layout: {
         type: "row",
@@ -37,8 +54,9 @@ const json: IJsonModel = {
                 children: [
                     {
                         type: "tab",
-                        name: "One",
-                        component: "placeholder",
+                        name: "Template",
+                        component: "monaco",
+                        "enableClose": false,
                     }
                 ]
             },
@@ -48,8 +66,21 @@ const json: IJsonModel = {
                 children: [
                     {
                         type: "tab",
-                        name: "Two",
-                        component: "placeholder",
+                        name: "Values",
+                        component: "monaco",
+                        "enableClose": false,
+                    }
+                ]
+            },
+            {
+                type: "tabset",
+                weight: 50,
+                children: [
+                    {
+                        type: "tab",
+                        name: "Output",
+                        component: "monaco",
+                        "enableClose": false,
                     }
                 ]
             }
@@ -69,6 +100,30 @@ function App() {
                 return <div className="placeholder">{node.getName()}</div>;
             case "json":
                 return <ModelJson model={model}/>;
+            case "monaco":
+                return                 <Editor
+                height="100%"
+                width="100%"
+                language="yaml"
+                defaultValue={`# Example Yaml here
+test:
+  - name: test
+    image: "nginx:latest"
+    replicas: 1
+    ports:
+      - 8080:80`}
+                theme="vs-dark"
+                options={{
+                    minimap: { enabled: true },
+                    scrollBeyondLastLine: false,
+                    automaticLayout: true,
+                    fontSize: 14,
+                    wordWrap: 'on',
+                    lineNumbers: 'on',
+                    folding: true
+                }}
+            />
+;
             default:
                 return <div>{"unknown component " + component}</div>
         }
