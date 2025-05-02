@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { Layout, Model, TabNode, IJsonModel, TabSetNode, BorderNode, ITabSetRenderValues, Actions, DockLocation, AddIcon } from 'flexlayout-react';
+import { Layout, Model, TabNode, IJsonModel, TabSetNode, BorderNode, ITabSetRenderValues } from 'flexlayout-react';
 import Editor from '@monaco-editor/react';
+import { editor as monacotypes } from 'monaco-editor';
 import './rounded_dark.css';
 import './App.css';
 import './monaco.css';
@@ -127,18 +128,9 @@ function showError(message: string) {
 }
 
 // Load dependencies sequentially
-function loadScript(src: string) {
-    return new Promise<void>((resolve, reject) => {
-        const script = document.createElement('script');
-        script.src = src;
-        script.onload = () => resolve();
-        script.onerror = () => reject(new Error(`Failed to load script: ${src}`));
-        document.head.appendChild(script);
-    });
-}
 
 // Wait for global object to be available
-function waitForGlobal(name: string, timeout = 5000) {
+function waitForGlobal(name: any, timeout = 5000) {
     return new Promise<any>((resolve, reject) => {
         const start = Date.now();
         const interval = setInterval(() => {
@@ -198,7 +190,6 @@ function readHash() {
 
 
 function App() {
-    const nextAddIndex = useRef<number>(1);
     const editorRef = useRef<any>(null);
     const valuesRef = useRef<any>(null);
     const outputRef = useRef<any>(null);
@@ -255,10 +246,10 @@ function App() {
 
         // Register a custom code lens provider
         monaco.languages.registerCodeLensProvider('yaml', {
-            provideCodeLenses: function (model, token) {
+            provideCodeLenses: function (model: any, _token: any) {
                 const markers = monaco.editor.getModelMarkers({ resource: model.uri });
                 return {
-                    lenses: markers.map(marker => ({
+                    lenses: markers.map((marker: { startLineNumber: any; startColumn: any; endLineNumber: any; endColumn: any; message: any; }) => ({
                         range: {
                             startLineNumber: marker.startLineNumber,
                             startColumn: marker.startColumn,
@@ -274,13 +265,13 @@ function App() {
                     dispose: () => { }
                 };
             },
-            resolveCodeLens: function (model, codeLens, token) {
+            resolveCodeLens: function (_model: any, codeLens: any, _token: any) {
                 return codeLens;
             }
         });
         
         // Register command handler for error markers
-        monaco.editor.registerCommand('showError', (accessor, ...args) => {
+        monaco.editor.registerCommand('showError', (_accessor: any, ...args: any[] ) => {
             const editor = editorRef.current;
             if (!editor) return;
             
@@ -388,9 +379,7 @@ function App() {
                     updateHash(templateValue, valuesValue);
                 } catch (error) {
                     console.error('Error in onChange handler:', error);
-                    if (debugTerminalRef.current) {
-                        debugTerminalRef.current.textContent = `Error in onChange handler: ${error}`;
-                    }
+                    setDebugMessage(`Error in onChange handler: ${error}`);
                 }
             };
 
@@ -434,7 +423,7 @@ function App() {
                         lineNumbers: 'on',
                         renderValidationDecorations: 'on',
                         folding: true,
-                        lightbulb: { enabled: 'on' }
+                        lightbulb: { enabled: monacotypes.ShowLightbulbIconMode.On }
                     }}
                     onMount={(editor, monaco) => {
                         editorRef.current = editor;
@@ -500,7 +489,7 @@ function App() {
         }
     }
 
-    const onRenderTabSet = (node: TabSetNode | BorderNode, renderValues: ITabSetRenderValues) => {
+    const onRenderTabSet = (_node: TabSetNode | BorderNode, _renderValues: ITabSetRenderValues) => {
         // if (node instanceof TabSetNode) {
         //     renderValues.stickyButtons.push(
         //         <button
