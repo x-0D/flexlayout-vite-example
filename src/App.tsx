@@ -291,8 +291,9 @@ function App() {
                     );
 
                     // Clear existing markers
+                    // Clear all markers first
                     monaco.editor.setModelMarkers(editor.getModel(), 'template-errors', []);
-
+                    
                     if (err) {
                         const templateError = parseTemplateError(err);
                         if (templateError) {
@@ -305,6 +306,7 @@ function App() {
                                 endColumn: editor.getModel().getLineMaxColumn(templateError.lineNum + 1)
                             }];
                             
+                            // Set markers only once with the new error
                             monaco.editor.setModelMarkers(editor.getModel(), 'template-errors', markers);
                         }
                     } else {
@@ -319,7 +321,11 @@ function App() {
                                 endLineNumber: 1,
                                 endColumn: 1
                             }];
+                            // Set warning markers only once
                             monaco.editor.setModelMarkers(editor.getModel(), 'template-errors', markers);
+                        } else {
+                            // Clear markers if there's no warning
+                            monaco.editor.setModelMarkers(editor.getModel(), 'template-errors', []);
                         }
                     }
 
