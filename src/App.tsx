@@ -24,8 +24,8 @@ const json: IJsonModel = {
             "children": [
                 {
                     "type": "tab",
-                    "name": "JSON",
-                    "component": "json",
+                    "name": "Debug",
+                    "component": "debug-terminal",
                     "enableClose": false,
                 },
             ]
@@ -203,6 +203,7 @@ function App() {
     const valuesRef = useRef<any>(null);
     const outputRef = useRef<any>(null);
     const monacoRef = useRef<any>(null);
+    const [debugMessage, setDebugMessage] = useState<string>(''); // Add state for debug message
     const [initialValues, setInitialValues] = useState({
         template: defaultTemplateYaml,
         values: defaultValuesYaml,
@@ -277,6 +278,52 @@ function App() {
                 return codeLens;
             }
         });
+        
+        // Register command handler for error markers
+        monaco.editor.registerCommand('showError', (accessor, ...args) => {
+            const editor = editorRef.current;
+            if (!editor) return;
+            
+            const [marker] = args;
+            if (marker) {
+                editor.revealLineInCenter(marker.startLineNumber);
+                editor.setPosition({
+                    lineNumber: marker.startLineNumber,
+                    column: marker.startColumn
+                });
+                editor.focus();
+                
+                // Show peek view for the error
+                const range = {
+                    startLineNumber: marker.startLineNumber,
+                    startColumn: marker.startColumn,
+                    endLineNumber: marker.endLineNumber,
+                    endColumn: marker.endColumn
+                };
+                
+                // Create error decorations
+                const decorations = [{
+                    range,
+                    options: {
+                        isWholeLine: true,
+                        className: 'errorDecoration',
+                        glyphMarginClassName: 'errorGlyphMargin',
+                        hoverMessage: { value: marker.message }
+                    }
+                }];
+                
+                // Add decorations and show peek view
+                const decorationIds = editor.deltaDecorations([], decorations);
+                setTimeout(() => {
+                    editor.removeDecorations(decorationIds);
+                }, 3000);
+                
+                editor.getContribution('editor.contrib.peekViewWidget').show(range, [{
+                    range,
+                    message: marker.message
+                }]);
+            }
+        });
 
         // Load WASM functionality
         window.loadGetYaml().then((getYaml) => {
@@ -289,6 +336,15 @@ function App() {
                         templateValue,
                         valuesValue
                     );
+
+                    // Update debug terminal state
+                    if (err) {
+                        setDebugMessage(err);
+                    } else if (warning) {
+                        setDebugMessage(warning);
+                    } else {
+                        setDebugMessage(''); // Clear message if no error/warning
+                    }
 
                     // Clear existing markers
                     // Clear all markers first
@@ -332,6 +388,9 @@ function App() {
                     updateHash(templateValue, valuesValue);
                 } catch (error) {
                     console.error('Error in onChange handler:', error);
+                    if (debugTerminalRef.current) {
+                        debugTerminalRef.current.textContent = `Error in onChange handler: ${error}`;
+                    }
                 }
             };
 
@@ -354,6 +413,10 @@ function App() {
                 return <div className="placeholder">{node.getName()}</div>;
             case "json":
                 return <ModelJson model={model} />;
+            case "debug-terminal":
+                return <div className="debug-terminal">
+                    <pre className="debug-terminal-content">{debugMessage}</pre>
+                </div>;
             case "monaco-template":
                 return <Editor
                     height="100%"
@@ -438,20 +501,20 @@ function App() {
     }
 
     const onRenderTabSet = (node: TabSetNode | BorderNode, renderValues: ITabSetRenderValues) => {
-        if (node instanceof TabSetNode) {
-            renderValues.stickyButtons.push(
-                <button
-                    key="Add"
-                    title="Add"
-                    className="flexlayout__tab_toolbar_button"
-                    onClick={() => {
-                        model.doAction(Actions.addNode({
-                            component: "placeholder",
-                            name: "Added " + nextAddIndex.current++
-                        }, node.getId(), DockLocation.CENTER, -1, true));
-                    }}
-                ><AddIcon /></button>);
-        }
+        // if (node instanceof TabSetNode) {
+        //     renderValues.stickyButtons.push(
+        //         <button
+        //             key="Add"
+        //             title="Add"
+        //             className="flexlayout__tab_toolbar_button"
+        //             onClick={() => {
+        //                 model.doAction(Actions.addNode({
+        //                     component: "placeholder",
+        //                     name: "Added " + nextAddIndex.current++
+        //                 }, node.getId(), DockLocation.CENTER, -1, true));
+        //             }}
+        //         ><AddIcon /></button>);
+        // }
     }
 
     return (
