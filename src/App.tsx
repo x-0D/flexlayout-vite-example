@@ -6,14 +6,14 @@ import './App.css';
 import './monaco.css';
 
 const json: IJsonModel = {
-    global: { 
+    global: {
         "tabEnablePopout": true,
         "splitterEnableHandle": true,
-		"tabSetMinWidth": 130,
-		"tabSetMinHeight": 100,
-		"borderMinSize": 100,
-		"tabSetEnableTabScrollbar": true,
-		"borderEnableTabScrollbar": true,
+        "tabSetMinWidth": 130,
+        "tabSetMinHeight": 100,
+        "borderMinSize": 100,
+        "tabSetEnableTabScrollbar": true,
+        "borderEnableTabScrollbar": true,
         "tabEnableRename": false,
         "borderEnableAutoHide": true,
     },
@@ -55,7 +55,7 @@ const json: IJsonModel = {
                     {
                         type: "tab",
                         name: "Template",
-                        component: "monaco",
+                        component: "monaco-template",
                         "enableClose": false,
                     }
                 ]
@@ -67,7 +67,7 @@ const json: IJsonModel = {
                     {
                         type: "tab",
                         name: "Values",
-                        component: "monaco",
+                        component: "monaco-values",
                         "enableClose": false,
                     }
                 ]
@@ -79,7 +79,7 @@ const json: IJsonModel = {
                     {
                         type: "tab",
                         name: "Output",
-                        component: "monaco",
+                        component: "monaco-output",
                         "enableClose": false,
                     }
                 ]
@@ -90,8 +90,256 @@ const json: IJsonModel = {
 
 const model = Model.fromJson(json);
 
+/* CODE PORTED FROM Vanilla JS START */
+// These functions will be available after scripts are loaded
+declare global {
+    interface Window {
+        LZString: any;
+        Go: any;
+        loadGetYaml: () => Promise<any>;
+        GetYaml: (templateYaml: string, valuesYaml: string) => string;
+    }
+}
+
+// Default template and values
+const defaultTemplateYaml = "---\nexample: {{- .Values.items | toYaml | nindent 2 }}\n";
+const defaultValuesYaml = '---\nitems: ["first", "second"]\n';
+const defaultOutput = "---\nexample: \n  - first\n  - second\n";
+
+// Parse template error to get line and character numbers
+function parseTemplateError(err: string) {
+    const match = err.match(/template: .*:(\d+): (.*)/);
+    if (match) {
+        return {
+            lineNum: parseInt(match[1]) - 1,
+            message: match[2]
+        };
+    }
+    return null;
+}
+
+// Error handling utility
+function showError(message: string) {
+    const errorDiv = document.createElement('div');
+    errorDiv.className = 'error-message';
+    errorDiv.textContent = message;
+    document.body.prepend(errorDiv);
+}
+
+// Load dependencies sequentially
+function loadScript(src: string) {
+    return new Promise<void>((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = src;
+        script.onload = () => resolve();
+        script.onerror = () => reject(new Error(`Failed to load script: ${src}`));
+        document.head.appendChild(script);
+    });
+}
+
+// Wait for global object to be available
+function waitForGlobal(name: string, timeout = 5000) {
+    return new Promise<any>((resolve, reject) => {
+        const start = Date.now();
+        const interval = setInterval(() => {
+            if (window[name]) {
+                clearInterval(interval);
+                resolve(window[name]);
+            } else if (Date.now() - start > timeout) {
+                clearInterval(interval);
+                reject(new Error(`Timeout waiting for ${name}`));
+            }
+        }, 100);
+    });
+}
+
+// Initialize the environment by loading all required scripts
+async function initializeEnvironment() {
+    try {
+        // Wait for LZString to be available
+        await waitForGlobal('LZString');
+        
+        return true;
+    } catch (error) {
+        console.error('Failed to initialize environment:', error);
+        throw error;
+    }
+}
+
+// Helper functions for URL hash management
+function compressToEncodedURIComponent(value: string) {
+    return window.LZString.compressToEncodedURIComponent(value);
+}
+
+function decompressFromEncodedURIComponent(value: string) {
+    return window.LZString.decompressFromEncodedURIComponent(value);
+}
+
+function updateHash(templateValue: string, valuesValue: string) {
+    const hashParams = new URLSearchParams();
+    hashParams.append("t", compressToEncodedURIComponent(templateValue));
+    hashParams.append("v", compressToEncodedURIComponent(valuesValue));
+    const hash = hashParams.toString();
+    window.history.replaceState(null, "", `#${hash}`);
+}
+
+function readHash() {
+    const hashContent = window.location.hash.slice(1);
+    if (hashContent === "") {
+        return null;
+    }
+    const params = new URLSearchParams(hashContent);
+    const templateValue = decompressFromEncodedURIComponent(params.get("t") || "");
+    const valuesValue = decompressFromEncodedURIComponent(params.get("v") || "");
+    return { templateValue, valuesValue };
+}
+
+/* CODE PORTED FROM Vanilla JS END */
+
+
 function App() {
     const nextAddIndex = useRef<number>(1);
+    const editorRef = useRef<any>(null);
+    const valuesRef = useRef<any>(null);
+    const outputRef = useRef<any>(null);
+    const monacoRef = useRef<any>(null);
+    const [initialValues, setInitialValues] = useState({
+        template: defaultTemplateYaml,
+        values: defaultValuesYaml,
+        output: defaultOutput
+    });
+
+    // Track editor mounting status
+    const [editorsReady, setEditorsReady] = useState({
+        template: false,
+        values: false,
+        output: false,
+        monaco: false
+    });
+
+    // Initialize the environment and setup editors
+    useEffect(() => {
+        // Initialize the environment
+        initializeEnvironment().then(() => {
+            // Read values from hash if available
+            const fromHash = readHash();
+            if (fromHash) {
+                setInitialValues({
+                    template: fromHash.templateValue,
+                    values: fromHash.valuesValue,
+                    output: ""
+                });
+            }
+        }).catch(error => {
+            showError(`Critical error during initialization: ${error.message}`);
+            console.error('Critical error:', error);
+        });
+    }, []);
+
+    // Setup WASM integration once all editors are ready
+    useEffect(() => {
+        // Check if all editors are mounted
+        if (!editorsReady.template || !editorsReady.values || !editorsReady.output || !editorsReady.monaco) {
+            return; // Wait until all editors are ready
+        }
+
+        const editor = editorRef.current;
+        const values = valuesRef.current;
+        const output = outputRef.current;
+        const monaco = monacoRef.current;
+
+        if (!editor || !values || !output || !monaco) {
+            return; // Safety check
+        }
+
+        // Register a custom code lens provider
+        monaco.languages.registerCodeLensProvider('yaml', {
+            provideCodeLenses: function (model, token) {
+                const markers = monaco.editor.getModelMarkers({ resource: model.uri });
+                return {
+                    lenses: markers.map(marker => ({
+                        range: {
+                            startLineNumber: marker.startLineNumber,
+                            startColumn: marker.startColumn,
+                            endLineNumber: marker.endLineNumber,
+                            endColumn: marker.endColumn
+                        },
+                        id: `error-${marker.startLineNumber}`,
+                        command: {
+                            id: 'showError',
+                            title: `⚠️ ${marker.message}`
+                        }
+                    })),
+                    dispose: () => { }
+                };
+            },
+            resolveCodeLens: function (model, codeLens, token) {
+                return codeLens;
+            }
+        });
+
+        // Load WASM functionality
+        window.loadGetYaml().then((getYaml) => {
+            const onChange = () => {
+                try {
+                    const templateValue = editor.getValue();
+                    const valuesValue = values.getValue();
+
+                    const { yaml, err, warning } = getYaml(
+                        templateValue,
+                        valuesValue
+                    );
+
+                    // Clear existing markers
+                    monaco.editor.setModelMarkers(editor.getModel(), 'template-errors', []);
+
+                    if (err) {
+                        const templateError = parseTemplateError(err);
+                        if (templateError) {
+                            const markers = [{
+                                severity: monaco.MarkerSeverity.Error,
+                                message: templateError.message,
+                                startLineNumber: templateError.lineNum + 1,
+                                startColumn: 1,
+                                endLineNumber: templateError.lineNum + 1,
+                                endColumn: editor.getModel().getLineMaxColumn(templateError.lineNum + 1)
+                            }];
+                            
+                            monaco.editor.setModelMarkers(editor.getModel(), 'template-errors', markers);
+                        }
+                    } else {
+                        output.setValue(yaml);
+
+                        if (warning) {
+                            const markers = [{
+                                severity: monaco.MarkerSeverity.Warning,
+                                message: `Warning: ${warning}`,
+                                startLineNumber: 1,
+                                startColumn: 1,
+                                endLineNumber: 1,
+                                endColumn: 1
+                            }];
+                            monaco.editor.setModelMarkers(editor.getModel(), 'template-errors', markers);
+                        }
+                    }
+
+                    updateHash(templateValue, valuesValue);
+                } catch (error) {
+                    console.error('Error in onChange handler:', error);
+                }
+            };
+
+            // Register change handlers
+            editor.onDidChangeModelContent(onChange);
+            values.onDidChangeModelContent(onChange);
+            
+            // Initial render
+            setTimeout(onChange, 100); // Small delay to ensure everything is ready
+        }).catch(error => {
+            showError(`Error loading WASM functionality: ${error.message}`);
+            console.error('WASM error:', error);
+        });
+    }, [editorsReady]);
 
     const factory = (node: TabNode) => {
         const component = node.getComponent();
@@ -99,31 +347,85 @@ function App() {
             case "placeholder":
                 return <div className="placeholder">{node.getName()}</div>;
             case "json":
-                return <ModelJson model={model}/>;
-            case "monaco":
-                return                 <Editor
-                height="100%"
-                width="100%"
-                language="yaml"
-                defaultValue={`# Example Yaml here
-test:
-  - name: test
-    image: "nginx:latest"
-    replicas: 1
-    ports:
-      - 8080:80`}
-                theme="vs-dark"
-                options={{
-                    minimap: { enabled: true },
-                    scrollBeyondLastLine: false,
-                    automaticLayout: true,
-                    fontSize: 14,
-                    wordWrap: 'on',
-                    lineNumbers: 'on',
-                    folding: true
-                }}
-            />
-;
+                return <ModelJson model={model} />;
+            case "monaco-template":
+                return <Editor
+                    height="100%"
+                    width="100%"
+                    language="yaml"
+                    value={initialValues.template}
+                    theme="vs-dark"
+                    options={{
+                        minimap: { enabled: false },
+                        codeLens: true,
+                        scrollBeyondLastLine: false,
+                        automaticLayout: true,
+                        fontSize: 14,
+                        wordWrap: 'on',
+                        lineNumbers: 'on',
+                        renderValidationDecorations: 'on',
+                        folding: true,
+                        lightbulb: { enabled: 'on' }
+                    }}
+                    onMount={(editor, monaco) => {
+                        editorRef.current = editor;
+                        monacoRef.current = monaco;
+                        setEditorsReady(prev => ({
+                            ...prev,
+                            template: true,
+                            monaco: true
+                        }));
+                    }}
+                />;
+            case "monaco-values":
+                return <Editor
+                    height="100%"
+                    width="100%"
+                    language="yaml"
+                    value={initialValues.values}
+                    theme="vs-dark"
+                    options={{
+                        minimap: { enabled: false },
+                        scrollBeyondLastLine: false,
+                        automaticLayout: true,
+                        fontSize: 14,
+                        wordWrap: 'on',
+                        lineNumbers: 'on',
+                        folding: true,
+                    }}
+                    onMount={(editor) => {
+                        valuesRef.current = editor;
+                        setEditorsReady(prev => ({
+                            ...prev,
+                            values: true
+                        }));
+                    }}
+                />;
+            case "monaco-output":
+                return <Editor
+                    height="100%"
+                    width="100%"
+                    language="yaml"
+                    value={initialValues.output}
+                    theme="vs-dark"
+                    options={{
+                        minimap: { enabled: false },
+                        scrollBeyondLastLine: false,
+                        automaticLayout: true,
+                        readOnly: true,
+                        fontSize: 14,
+                        wordWrap: 'on',
+                        lineNumbers: 'on',
+                        folding: true,
+                    }}
+                    onMount={(editor) => {
+                        outputRef.current = editor;
+                        setEditorsReady(prev => ({
+                            ...prev,
+                            output: true
+                        }));
+                    }}
+                />;
             default:
                 return <div>{"unknown component " + component}</div>
         }
@@ -142,7 +444,7 @@ test:
                             name: "Added " + nextAddIndex.current++
                         }, node.getId(), DockLocation.CENTER, -1, true));
                     }}
-                ><AddIcon/></button>);
+                ><AddIcon /></button>);
         }
     }
 
@@ -157,7 +459,7 @@ test:
 }
 
 // component to show the current model json
-function ModelJson({model}:{model: Model}) {
+function ModelJson({ model }: { model: Model }) {
     const [json, setJson] = useState<string>(JSON.stringify(model.toJson(), null, "\t"));
     const timerRef = useRef<number>(0);
 
@@ -165,7 +467,7 @@ function ModelJson({model}:{model: Model}) {
         timerRef.current = setInterval(() => {
             setJson(JSON.stringify(model.toJson(), null, "\t"));
         }, 500);
-        return () => { clearInterval(timerRef.current)}
+        return () => { clearInterval(timerRef.current) }
     }, []);
 
     return (
